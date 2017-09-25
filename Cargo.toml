@@ -1,8 +1,20 @@
 [package]
-name = "servo-embedding-example"
+authors = ["Antoni Boucher <bouanto@zoho.com>"]
+name = "servo-embedding-gtk-example"
 version = "0.1.0"
-authors = ["Paul Rouget <me@paulrouget.com>"]
 
 [dependencies]
-libservo = { git = "https://github.com/servo/servo", rev = "6051e5ed02" }
-glutin = "0.9"
+gdk = "^0.6.0"
+glib = "^0.3.1"
+gtk = "^0.2.0"
+shared_library = "=0.1.5"
+
+[dependencies.epoxy]
+path = "../epoxy-rs"
+
+[dependencies.libservo]
+git = "https://github.com/servo/servo"
+rev = "6051e5ed02"
+
+[features]
+default = ["gtk/v3_16"]
