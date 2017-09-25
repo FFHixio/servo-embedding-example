@@ -10,7 +10,7 @@ gtk = "^0.2.0"
 shared_library = "=0.1.5"
 
 [dependencies.epoxy]
-path = "../epoxy-rs"
+git = "https://github.com/antoyo/epoxy-rs"
 
 [dependencies.libservo]
 git = "https://github.com/servo/servo"
