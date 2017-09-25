@@ -111,6 +111,7 @@ fn main() {
 
     {
         let servo = servo.clone();
+        // TODO: switch to a wakeup event.
         gtk::idle_add(move || {
             servo.borrow_mut().handle_events(vec![]);
             Continue(true)
