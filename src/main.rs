@@ -1,12 +1,6 @@
-/*
- * TODO: framebuffer size.
- * FIXME: mouse position.
- * FIXME: when moving/resizing the window, it becomes black.
- */
-
 extern crate epoxy;
 extern crate gdk;
-extern crate glib;
+extern crate glib_itc;
 extern crate gtk;
 extern crate servo;
 extern crate shared_library;
@@ -15,10 +9,11 @@ use std::cell::RefCell;
 use std::env;
 use std::ptr;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use gdk::{Display, ScrollDirection, POINTER_MOTION_MASK, SCROLL_MASK};
 use gdk::enums::key;
-use glib::MainContext;
+use glib_itc::{Sender, channel};
 use gtk::{
     ContainerExt,
     Continue,
@@ -53,15 +48,15 @@ fn main() {
 
     println!("Servo version: {}", servo::config::servo_version());
 
-    let waker = Box::new(GtkEventLoopWaker);
-
     let gtk_window = Window::new(WindowType::Toplevel);
+    gtk_window.set_size_request(800, 600);
     gtk_window.add_events((POINTER_MOTION_MASK | SCROLL_MASK).bits() as i32);
 
     let vbox = gtk::Box::new(Vertical, 0);
     gtk_window.add(&vbox);
 
     let gl_area = GLArea::new();
+    gl_area.set_auto_render(false);
     gl_area.add_events((POINTER_MOTION_MASK | SCROLL_MASK).bits() as i32);
     gl_area.set_vexpand(true);
     vbox.add(&gl_area);
@@ -94,6 +89,12 @@ fn main() {
     let opts = opts::default_opts();
     opts::set_defaults(opts);
 
+    let (tx, mut rx) = channel();
+
+    let waker = Box::new(GtkEventLoopWaker {
+        tx: Arc::new(Mutex::new(tx)),
+    });
+
     let window = Rc::new(ServoWindow {
         gl_area: gl_area.clone(),
         gtk_window: gtk_window.clone(),
@@ -103,33 +104,39 @@ fn main() {
 
     let servo = Rc::new(RefCell::new(servo::Servo::new(window.clone())));
 
+    {
+        let servo = servo.clone();
+        rx.connect_recv(move || {
+            servo.borrow_mut().handle_events(vec![]);
+            Continue(true)
+        });
+    }
+
     let url = ServoUrl::parse("https://servo.org").unwrap();
     let (sender, receiver) = ipc::channel().unwrap();
     servo.borrow_mut().handle_events(vec![WindowEvent::NewBrowser(url, sender)]);
     let browser_id = receiver.recv().unwrap();
     servo.borrow_mut().handle_events(vec![WindowEvent::SelectBrowser(browser_id)]);
 
-    {
-        let servo = servo.clone();
-        // TODO: switch to a wakeup event.
-        gtk::idle_add(move || {
-            servo.borrow_mut().handle_events(vec![]);
-            Continue(true)
-        });
-    }
-
     let pointer = Rc::new(RefCell::new((0.0, 0.0)));
     {
         let pointer = pointer.clone();
         let servo = servo.clone();
         gl_area.connect_motion_notify_event(move |_, event| {
-            println!("{:?}", event.get_position());
-            // FIXME: should get position relative to the widget, not the window.
             let (x, y) = event.get_position();
             *pointer.borrow_mut() = (x, y);
             let event = WindowEvent::MouseWindowMoveEventClass(TypedPoint2D::new(x as f32, y as f32));
             servo.borrow_mut().handle_events(vec![event]);
             Inhibit(false)
+        });
+    }
+
+    {
+        let servo = servo.clone();
+        let window = window.clone();
+        gl_area.connect_resize(move |_, _, _| {
+            let event = WindowEvent::Resize(window.framebuffer_size());
+            servo.borrow_mut().handle_events(vec![event]);
         });
     }
 
@@ -173,31 +180,23 @@ fn main() {
         });
     }
 
-    /*
-            // This is the event triggered by GtkEventLoopWaker
-            glutin::Event::Awakened => {
-                servo.handle_events(vec![]);
-            },
-    */
-
     gtk::main();
 }
 
-pub struct GtkEventLoopWaker;
+pub struct GtkEventLoopWaker {
+    tx: Arc<Mutex<Sender>>,
+}
 
 impl EventLoopWaker for GtkEventLoopWaker {
     // Use by servo to share the "event loop waker" across threads
     fn clone(&self) -> Box<EventLoopWaker + Send> {
-        Box::new(GtkEventLoopWaker)
+        Box::new(GtkEventLoopWaker {
+            tx: self.tx.clone(),
+        })
     }
     // Called by servo when the main thread needs to wake up
     fn wake(&self) {
-        if let Some(context) = MainContext::ref_thread_default() {
-            context.wakeup();
-        }
-        else {
-            panic!("No context");
-        }
+        self.tx.lock().unwrap().send();
     }
 }
 
@@ -216,8 +215,7 @@ impl WindowMethods for ServoWindow {
     }
 
     fn present(&self) {
-        self.gl_area.queue_render(); // TODO: to use with set_auto_render(false).
-        //self.gtk_window.swap_buffers().unwrap();
+        self.gl_area.queue_render();
     }
 
     fn supports_clipboard(&self) -> bool {
@@ -237,13 +235,8 @@ impl WindowMethods for ServoWindow {
     }
 
     fn framebuffer_size(&self) -> TypedSize2D<u32, DevicePixel> {
-        //let (width, height) = self.gtk_window.get_size();
+        let (width, height) = self.gtk_window.get_size();
         let scale_factor = self.gtk_window.get_scale_factor() as u32;
-        //println!("{}: {}, {}", scale_factor, scale_factor * width as u32, scale_factor * height as u32);
-        let width = 1280; // FIXME
-        //let height = 680;
-        let height = 720;
-        //println!("{}, {}", self.gl_area.get_allocated_width(), self.gl_area.get_allocated_height());
         TypedSize2D::new(scale_factor * width as u32, scale_factor * height as u32)
     }
 
