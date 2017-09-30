@@ -57,6 +57,7 @@ fn main() {
 
     let gl_area = GLArea::new();
     gl_area.set_auto_render(false);
+    gl_area.set_has_depth_buffer(true);
     gl_area.add_events((POINTER_MOTION_MASK | SCROLL_MASK).bits() as i32);
     gl_area.set_vexpand(true);
     vbox.add(&gl_area);
